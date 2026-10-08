@@ -11,18 +11,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             python: '3.11'
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             python: '3.12'
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             python: '3.13'
           - os: windows-latest
             python: '3.12'
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
         with:
           python-version: ${{ matrix.python }}
           cache: pip
