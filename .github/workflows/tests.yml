@@ -1,0 +1,48 @@
+name: Tests
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: '3.11'
+          - os: ubuntu-latest
+            python: '3.12'
+          - os: ubuntu-latest
+            python: '3.13'
+          - os: windows-latest
+            python: '3.12'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install ".[dev]"
+      - name: Test the minimum supported numerical dependencies
+        if: matrix.python == '3.11'
+        run: python -m pip install "numpy==1.26.4" "opencv-python-headless==4.10.0.84"
+      - run: python -m pytest -q
+      - run: python examples/detect_image.py
+      - run: python -m build
+      - name: Install and exercise the wheel outside the checkout
+        shell: python
+        run: |
+          import pathlib
+          import subprocess
+          import sys
+          import tempfile
+          wheel = next(pathlib.Path('dist').glob('*.whl')).resolve()
+          sample = pathlib.Path('examples/images/synthetic_a4.png').resolve()
+          subprocess.run([sys.executable, '-m', 'pip', 'install', '--force-reinstall', '--no-deps', str(wheel)], check=True)
+          with tempfile.TemporaryDirectory() as directory:
+              subprocess.run([sys.executable, '-m', 'a4_detector', str(sample)], cwd=directory, check=True)

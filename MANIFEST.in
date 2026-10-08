@@ -1,0 +1,5 @@
+include LICENSE README.md CHANGELOG.md CONTRIBUTING.md
+recursive-include docs *.md
+recursive-include examples *.py *.json *.png
+recursive-include tests *.py
+recursive-include src/a4_detector *.json

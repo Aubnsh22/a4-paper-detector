@@ -1,0 +1,14 @@
+{
+  "version": "capture_v1",
+  "semantics": "engineering_limits_not_calibrated_accuracy",
+  "alignmentExitDeg": 12,
+  "minImageShortEdgePx": 720,
+  "minA4ShortEdgePx": 180,
+  "frameMarginFraction": 0.015,
+  "minA4AreaFraction": 0.04,
+  "maxA4AreaFraction": 0.55,
+  "minA4Score": 0.6,
+  "maxA4CornerUncertaintyPx": 8,
+  "maxA4BoundaryResidualPx": 12,
+  "maxPoseResidualFraction": 0.012
+}

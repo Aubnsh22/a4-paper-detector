@@ -1,0 +1,61 @@
+{
+  "valid": true,
+  "corners": [
+    [
+      159.5436553955078,
+      179.54339599609375
+    ],
+    [
+      475.45660400390625,
+      179.5436553955078
+    ],
+    [
+      475.45635986328125,
+      626.4566040039062
+    ],
+    [
+      159.54339599609375,
+      626.4563598632812
+    ]
+  ],
+  "coordinate_order": [
+    "top_left",
+    "top_right",
+    "bottom_right",
+    "bottom_left"
+  ],
+  "coordinate_units": "pixels",
+  "image_size_wh": [
+    1280,
+    960
+  ],
+  "confidence": 0.8855685773096313,
+  "confidence_calibrated": false,
+  "orientation": "portrait",
+  "reasons": [],
+  "messages": [],
+  "checks": {
+    "resolution": true,
+    "a4": true,
+    "geometry": true
+  },
+  "policy_version": "capture_v1",
+  "boundary_hypothesis": "edges",
+  "boundary_residual_px": 1.4984054565429688,
+  "corner_uncertainty_px": 3.5991480350494385,
+  "visible_corner_count": 4,
+  "three_corner_reconstruction": false,
+  "alignment": {
+    "source": "a4_visual_focal_sweep",
+    "calibrated": false,
+    "tilt_deg": 0.057407862549801805,
+    "tilt_range_deg": [
+      0.019723637507418092,
+      0.057407862549801805
+    ],
+    "pitch_deg": -0.007053549990595331,
+    "roll_deg": 0.029659415900185986,
+    "residual_px": 0.02239909670032153,
+    "focal_is_assumed": true
+  }
+}
