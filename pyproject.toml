@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "a4-paper-detector"
-version = "0.1.0"
+version = "0.2.0"
 description = "A4 paper corner detection and reference validation with OpenCV."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,6 +24,7 @@ dev = ["pytest>=8,<10", "build>=1,<2"]
 
 [project.scripts]
 a4-detect = "a4_detector.cli:main"
+a4-detect-folder = "a4_detector.folder_cli:main"
 
 [project.urls]
 Repository = "https://github.com/Aubnsh22/a4-paper-detector"

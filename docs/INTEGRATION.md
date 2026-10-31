@@ -97,9 +97,25 @@ source application's A4-related engineering limits:
 | Maximum tilt across assumed focal lengths | At most 12 degrees |
 
 These are tuned acceptance limits, not universal camera-independent error
-bounds. There is no per-request configuration interface in version 0.1.0.
+bounds. There is no per-request configuration interface in version 0.2.0.
 If you change the policy in a fork, version that change and evaluate the
 effect on both accepted and rejected captures.
+
+## Comparing a photo set
+
+Run `a4-detect-folder ./photos --output-dir ./a4-results` to apply the same
+`detect_a4()` decision to every supported image in a folder. Open
+`a4-results/annotated/` to inspect the corners and `a4-results/summary.csv`
+to compare decisions, pixel coordinates, rejection reasons, and run times.
+The `results/` subfolder contains each complete JSON result. Use
+`--recursive` to include nested folders. A rejected image stays in the report
+with its reason; an image that cannot be decoded gets an error entry.
+
+When comparing with another detector, use the same oriented source image and
+coordinate convention. The corners returned here are ordered top-left,
+top-right, bottom-right, bottom-left in image coordinates. Do not compare
+pixels from separately resized images without mapping them back to the same
+image dimensions.
 
 ## Choosing an API
 

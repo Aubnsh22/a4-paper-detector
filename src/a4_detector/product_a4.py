@@ -22,6 +22,129 @@ from .reference import reference_assessment
 from .capture_policy import POLICY
 
 
+def _uniform_paper_rescue(image: np.ndarray, original: A4DetectionResult,
+                          reference: dict) -> tuple[A4DetectionResult, dict] | None:
+    """Recover a fully observed sheet when patterned floor corrupts the paper mask.
+
+    The contour and all four corners must come from image edges.  This path
+    only relaxes agreement with the brightness-derived paper mask, which can
+    follow pale checkerboard tiles instead of the sheet.
+    """
+    area = float(image.shape[0] * image.shape[1])
+    plausible = []
+    for candidate in original.candidates:
+        scores = candidate.score_components
+        # The brightness mask can miss a real sheet on a checkerboard or on a
+        # blue surface. In that case independent image edges still locate all
+        # four sides. Moderate edge support needs an especially uniform,
+        # bright interior; a darker sheet needs stronger boundary support.
+        edge = scores.get("strict_edge_continuity", 0.0)
+        bright_uniform = (
+            edge >= 0.75
+            and scores.get("interior_brightness", 0.0) >= 0.80
+            and scores.get("interior_uniformity", 0.0) >= 0.90
+        )
+        strong_edge = (
+            edge >= 0.92
+            and 0.60 <= scores.get("interior_brightness", 0.0) < 0.80
+            and scores.get("interior_uniformity", 0.0) >= 0.80
+        )
+        if not (
+            _candidate_blocker(candidate) == "Detected corners do not follow the visible paper boundary."
+            and candidate.is_fully_visible and not candidate.projected_corner
+            and candidate.visible_corner_count == 4
+            and 0.08 <= candidate.area / area <= 0.35
+            and candidate.score >= 0.74
+            and (bright_uniform or strong_edge)
+            and scores.get("rectified_uniformity", 0.0) >= 0.90
+            and scores.get("visible_ratio_prior", 0.0) >= 0.98
+            and scores.get("rectified_a4_ratio", 0.0) >= 0.98
+            and scores.get("internal_line_score", 0.0) >= 0.95
+            and candidate.boundary_residual_px <= 3.0
+            and candidate.corner_uncertainty_px <= 3.5
+        ):
+            continue
+        plausible.append(candidate)
+    if not plausible:
+        return None
+    plausible.sort(key=lambda candidate: candidate.score, reverse=True)
+    best = plausible[0]
+    for alternative in plausible[1:]:
+        intersection, _ = cv2.intersectConvexConvex(best.corners, alternative.corners)
+        smaller = min(best.area, alternative.area)
+        if intersection / max(smaller, 1.0) < 0.80:
+            return None
+    observed = A4DetectionResult(
+        success=True,
+        corners=_refine_corners_from_image(image, best.corners),
+        confidence=best.score,
+        message="A4 detected from four visible paper edges.",
+        orientation="portrait" if best.side_lengths[1] + best.side_lengths[3]
+        >= best.side_lengths[0] + best.side_lengths[2] else "landscape",
+        boundary_hypothesis="uniform_edge_boundary",
+        boundary_residual_px=best.boundary_residual_px,
+        reprojection_residual_px=best.reprojection_residual_px,
+        corner_uncertainty_px=best.corner_uncertainty_px,
+        visible_corner_count=4,
+    )
+    checked = reference_assessment(image, observed)
+    if not checked["valid"] or checked["alignment"]["tilt_deg"] > POLICY["alignmentExitDeg"]:
+        return None
+    checked["reference_diagnostics"].update(
+        detector="uniform_edge_boundary", original_reasons=reference["reasons"],
+        original_detection_message=original.message,
+    )
+    return observed, checked
+
+
+def _dominant_edge_rescue(image: np.ndarray, original: A4DetectionResult,
+                          reference: dict) -> tuple[A4DetectionResult, dict] | None:
+    """Resolve a contour-score tie when only one sheet has visible edges."""
+    if original.success:
+        return None
+    candidates = sorted(original.candidates, key=lambda item: item.score, reverse=True)
+    if not candidates:
+        return None
+    best = candidates[0]
+    scores = best.score_components
+    if not (
+        not _candidate_blocker(best)
+        and best.is_fully_visible and not best.projected_corner
+        and best.visible_corner_count == 4 and best.score >= 0.75
+        and scores.get("strict_edge_continuity", 0.0) >= 0.95
+        and scores.get("rectified_uniformity", 0.0) >= 0.80
+        and scores.get("visible_ratio_prior", 0.0) >= 0.95
+        and best.boundary_residual_px <= 4.0
+        and best.corner_uncertainty_px <= 4.0
+    ):
+        return None
+    for alternative in candidates[1:]:
+        if (alternative.score >= best.score * 0.92
+                and alternative.score_components.get("strict_edge_continuity", 0.0) >= 0.30):
+            return None
+    observed = A4DetectionResult(
+        success=True,
+        corners=_refine_corners_from_image(image, best.corners),
+        confidence=best.score,
+        message="A4 detected from four visible paper edges.",
+        orientation="portrait" if best.side_lengths[1] + best.side_lengths[3]
+        >= best.side_lengths[0] + best.side_lengths[2] else "landscape",
+        boundary_hypothesis="dominant_edge_boundary",
+        boundary_residual_px=best.boundary_residual_px,
+        reprojection_residual_px=best.reprojection_residual_px,
+        corner_uncertainty_px=best.corner_uncertainty_px,
+        visible_corner_count=4,
+    )
+    checked = reference_assessment(image, observed)
+    if not checked["valid"] or checked["alignment"]["tilt_deg"] > POLICY["alignmentExitDeg"]:
+        return None
+    checked["reference_diagnostics"].update(
+        detector="dominant_edge_boundary", original_reasons=reference["reasons"],
+        original_detection_message=original.message,
+    )
+    return observed, checked
+
+
 def _isolated_candidates(binary: np.ndarray, image: np.ndarray, edges: np.ndarray):
     binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -39,11 +162,23 @@ def _isolated_candidates(binary: np.ndarray, image: np.ndarray, edges: np.ndarra
 
 def _strong_boundary(candidate, continuity: float | None = None) -> bool:
     scores = candidate.score_components
-    return (not candidate.projected_corner and not _candidate_blocker(candidate)
-            and (scores["strict_edge_continuity"] if continuity is None else continuity) >= 0.85
-            and scores["interior_uniformity"] >= 0.65
+    edge = scores["strict_edge_continuity"] if continuity is None else continuity
+    if candidate.projected_corner or _candidate_blocker(candidate):
+        return False
+    if (edge >= 0.85 and scores["interior_uniformity"] >= 0.65
             and scores["rectified_uniformity"] >= 0.75
-            and scores["visible_ratio_prior"] >= 0.90)
+            and scores["visible_ratio_prior"] >= 0.90):
+        return True
+    # A shadow across an otherwise complete sheet can lower interior
+    # uniformity. Accept that shape only with nearly continuous image edges
+    # and tight observed corner/boundary fits.
+    return (candidate.is_fully_visible and candidate.visible_corner_count == 4
+            and edge >= 0.95 and candidate.score >= 0.72
+            and scores["interior_uniformity"] >= 0.55
+            and scores["rectified_uniformity"] >= 0.75
+            and scores["visible_ratio_prior"] >= 0.98
+            and candidate.boundary_residual_px <= 4.0
+            and candidate.corner_uncertainty_px <= 4.0)
 
 
 def detect_product_reference(image: np.ndarray, *, initial: A4DetectionResult | None = None,
@@ -56,6 +191,12 @@ def detect_product_reference(image: np.ndarray, *, initial: A4DetectionResult | 
     h, w = image.shape[:2]
     if min(h, w) < POLICY["minImageShortEdgePx"]:
         return original, reference
+    recovered = _uniform_paper_rescue(image, original, reference)
+    if recovered is not None:
+        return recovered
+    recovered = _dominant_edge_rescue(image, original, reference)
+    if recovered is not None:
+        return recovered
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     edges = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0), 20, 60)

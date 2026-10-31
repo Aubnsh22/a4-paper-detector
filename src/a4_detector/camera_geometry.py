@@ -1,7 +1,14 @@
-"""Pinhole pose checks using an assumed focal range for A4 guidance."""
+"""Camera state validation and pinhole pose, without single-sheet self-calibration.
+
+All world coordinates are millimetres. A4 is z=0; positive endpoint height
+points toward the camera, independent of the recovered plane-normal sign.
+An assumed focal length is suitable for guidance/research, never ground truth.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -22,13 +29,56 @@ def valid_quad(corners: np.ndarray, shape: tuple[int, int]) -> bool:
     )
 
 
-
 def centered_camera(shape: tuple[int, int], focal_px: float) -> np.ndarray:
     if not np.isfinite(focal_px) or focal_px <= 0:
         raise ValueError("Focal length must be positive and finite.")
     h, w = shape
     return np.array([[focal_px, 0, (w - 1) / 2], [0, focal_px, (h - 1) / 2], [0, 0, 1]], dtype=float)
 
+
+@dataclass(frozen=True)
+class CameraCalibration:
+    camera_matrix: np.ndarray
+    distortion: np.ndarray
+    image_size_wh: tuple[int, int]
+    camera_id: str
+    crop_state: str
+    rms_px: float
+    view_count: int
+
+    @classmethod
+    def load(cls, path: str | Path) -> "CameraCalibration":
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if data.get("schema_version") != "camera_calibration_v1":
+            raise ValueError("Unknown calibration schema.")
+        result = cls(np.asarray(data["camera_matrix"], float), np.asarray(data["distortion"], float),
+                     tuple(data["image_size_wh"]), str(data["camera_id"]), str(data["crop_state"]),
+                     float(data["rms_px"]), int(data["view_count"]))
+        result.for_image(tuple(reversed(result.image_size_wh)), result.camera_id, result.crop_state)
+        return result
+
+    def for_image(self, shape: tuple[int, int], camera_id: str, crop_state: str) -> tuple[np.ndarray, np.ndarray]:
+        k = np.asarray(self.camera_matrix, float)
+        d = np.asarray(self.distortion, float).reshape(-1)
+        w, h = self.image_size_wh
+        if (k.shape != (3, 3) or not np.all(np.isfinite(k)) or not np.all(np.isfinite(d))
+                or d.size not in (4, 5, 8, 12, 14) or min(w, h, *shape) <= 0
+                or not np.allclose(k[2], [0, 0, 1]) or abs(k[0, 1]) > 1e-6
+                or abs(k[1, 0]) > 1e-6 or min(k[0, 0], k[1, 1]) <= 0
+                or not (0 <= k[0, 2] < w and 0 <= k[1, 2] < h)
+                or not np.isfinite(self.rms_px) or not 0 <= self.rms_px <= 1.5 or self.view_count < 8):
+            raise ValueError("Calibration is missing or unstable; use at least eight diverse calibration views.")
+        if not self.camera_id or not self.crop_state or (camera_id, crop_state) != (self.camera_id, self.crop_state):
+            raise ValueError("Camera, zoom, crop or stabilization state does not match the calibration.")
+        sy, sx = shape[0] / h, shape[1] / w
+        if not np.isclose(sx, sy, rtol=0.002):
+            raise ValueError("Calibration aspect ratio does not match the image; crop/orientation is unknown.")
+        scaled = k.copy()
+        scaled[0, 0] *= sx
+        scaled[1, 1] *= sy
+        scaled[0, 2] = (k[0, 2] + 0.5) * sx - 0.5
+        scaled[1, 2] = (k[1, 2] + 0.5) * sy - 0.5
+        return scaled, d
 
 
 @dataclass(frozen=True)
@@ -67,7 +117,6 @@ class PlanePose:
         if not np.all(np.isfinite(depth)) or np.any(depth <= 0):
             raise ValueError("Invalid metric camera z-depth.")
         return (self.rays(pixels) * depth[:, None] - self.translation) @ self.rotation
-
 
 
 def solve_a4_pose(corners: np.ndarray, shape: tuple[int, int], camera: np.ndarray,
@@ -110,7 +159,6 @@ def solve_a4_pose(corners: np.ndarray, shape: tuple[int, int], camera: np.ndarra
     if not candidates:
         raise ValueError("A4 pose is not physically recoverable.")
     return min(candidates, key=lambda item: item.residual_px)
-
 
 
 def visual_alignment(corners: np.ndarray, shape: tuple[int, int]) -> dict:

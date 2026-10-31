@@ -1,137 +1,94 @@
 # A4 Paper Detector
 
-Detect the four corners of an A4 sheet in a photograph using OpenCV and NumPy.
-The package includes paper-boundary recovery, reference validation, and a
-homography helper for mapping image coordinates onto the paper plane.
+This repository contains the A4 detection and reference-checking code used by the foot-measurement project. It can be run on one photo or on a folder of photos. Folder mode saves an annotated copy of every photo and a report for comparing results.
 
-Extracted from a foot-measurement application. Runs locally on a CPU with no
-model downloads, API keys, or network calls during detection.
+The detector uses OpenCV and NumPy on the CPU. It does not download a model or send images over the network.
 
-## Installation
+## Install
 
 Requires Python 3.11 or newer.
 
 ```bash
-python -m pip install "git+https://github.com/Aubnsh22/a4-paper-detector.git@v0.1.0"
+python -m pip install "git+https://github.com/Aubnsh22/a4-paper-detector.git@v0.2.0"
 ```
 
-Alternatively, download or clone the repository and install it locally:
+The package installs `opencv-python-headless`. Avoid installing a second OpenCV wheel into the same environment.
+
+## Compare a folder of photos
+
+Put the test photos in a folder, then run:
 
 ```bash
-git clone https://github.com/Aubnsh22/a4-paper-detector.git
-cd a4-paper-detector
-python -m pip install .
+a4-detect-folder ./photos --output-dir ./a4-results
 ```
 
-Use a virtual environment if your application has its own dependencies. The
-package installs `opencv-python-headless`; do not install another OpenCV wheel
-alongside it in the same environment, as they provide the same `cv2` module.
+The output contains:
 
-## Python usage
+- `annotated/`: photos with the accepted A4 boundary in green or a rejection label in red.
+- `results/`: the full JSON result for each photo, including corners and any rejection messages.
+- `summary.csv`: one row per input photo for a quick spreadsheet comparison.
+- `summary.json`: the same summary with overall accepted and rejected counts.
+
+Images in subfolders are included with `--recursive`:
+
+```bash
+a4-detect-folder ./photos --recursive --output-dir ./a4-results
+```
+
+You can compare the green corners with another detector's output and compare its decision with the `valid` column. Rejected photos are included in the report; an unreadable photo has an error in its row. Supported formats are JPEG, PNG, TIFF, BMP, and WebP.
+
+## Run on one photo
+
+```bash
+a4-detect ./photo.jpg --output result.json --overlay overlay.png
+```
+
+The command exits with `0` when the reference is accepted, `1` when it is rejected, and `2` for an input or output error.
+
+## Use from Python
 
 ```python
 import cv2
 from a4_detector import detect_a4
 
-image = cv2.imread("photo.jpg")  # uint8 BGR, shape (height, width, 3)
+image = cv2.imread("photo.jpg")  # uint8 BGR image
 if image is None:
     raise ValueError("Could not read photo.jpg")
 
 result = detect_a4(image)
-
-if result.valid:
-    corners = result.corners  # (4, 2): top-left, top-right, bottom-right, bottom-left
-    print(corners)
-else:
-    print(result.messages)
-
-payload = result.to_dict()  # JSON-compatible, including rejection reasons
+print("Accepted:", result.valid)
+print("Corners:", result.corners)  # TL, TR, BR, BL in input-image pixels, or None
+print("Reasons:", result.reasons)
+print("Messages:", result.messages)
 ```
 
-Coordinates refer to the input image, in pixels. `result.corners` is `None`
-when the reference is rejected. `result.confidence` is a ranking score, not
-a probability that the detection is correct.
+Orient the image according to its EXIF data before detection. If the image is resized or cropped first, returned coordinates refer to that transformed image. `confidence` is a ranking score, not a probability.
 
-Convert RGB images to BGR before detection. Decode and orient the image once,
-then use that same image for detection, overlays, and downstream processing.
+## What is included
 
-## Command line
+`detect_a4()` runs the core paper detector, the project's boundary-recovery path, and the A4 reference checks. The checks cover the visible paper corners, image and paper size, boundary quality, and camera-pose diagnostics. It does not detect a foot or validate a final foot measurement.
 
-From a clone of the repository:
-
-```bash
-python examples/detect_image.py
-a4-detect examples/images/synthetic_a4.png --output outputs/result.json --overlay outputs/overlay.png
-```
-
-`python -m a4_detector` accepts the same arguments as `a4-detect`.
-Without `--output`, the result is printed as JSON. The exit code is `0` for an
-accepted reference, `1` for a rejected reference, and `2` for an input or output
-error. CLI image formats depend on the installed OpenCV codecs; JPEG and PNG
-are the recommended inputs. HEIC is not decoded by this package.
-
-The example below is synthetic. Its known rectangle is used to check corner
-localization, not to demonstrate real-camera accuracy.
-
-![Detected corners on the synthetic sample](examples/images/synthetic_a4_overlay.png)
-
-## Integration
-
-Use `detect_a4()` for the reference acceptance rules from the original
-application. It includes four visible corners, image and paper size limits,
-boundary diagnostics, and an assumed-focal pose check.
-
-For applications that need the detector without those acceptance rules:
+For the lower-level corner candidate without the project's acceptance decision:
 
 ```python
 from a4_detector import detect_a4_paper
 
-detection = detect_a4_paper(image, collect_debug=True)
+detection = detect_a4_paper(image)
 print(detection.success, detection.corners, detection.message)
 ```
 
-The core detector can accept cases that `detect_a4()` rejects, including a
-reconstructed fourth corner or stronger perspective. Core `success` alone
-does not mean the reference is suitable for measurement.
+Core detection success does not mean that the sheet passed the reference checks. See [Integration](docs/INTEGRATION.md) for the result fields and [Algorithm](docs/ALGORITHM.md) for the processing steps and source components.
 
-The core implementation is also available as a single file:
-[`src/a4_detector/a4_detection.py`](src/a4_detector/a4_detection.py). It can be
-copied into a Python project with OpenCV and NumPy installed. Keep the MIT
-license with redistributed code. Copying this file alone does not include
-the additional validation and colour-boundary recovery.
-
-See [Integration](docs/INTEGRATION.md) for the result schema, homography usage,
-and validation thresholds, and [Algorithm](docs/ALGORITHM.md) for the detection
-steps and source extraction details.
-
-## Limits
-
-The sheet must actually be A4, **210 x 297 mm**, flat, and on the reference
-plane. A photograph cannot establish physical paper size. A3 and A5 have the
-same proportions, and other rectangles can resemble paper.
-
-Pale or patterned floors, shadows, glare, blur, folds, occlusion, and strong
-perspective can cause missed or incorrect detections. Corner and confidence
-diagnostics are engineering heuristics, not calibrated uncertainty estimates.
-Test on images from the cameras and capture conditions used by your application.
-
-This package detects the paper reference. It does not detect feet, choose
-heel/toe points, or establish the accuracy of a foot measurement.
+The paper must be a flat A4 sheet (210 × 297 mm). Images alone cannot distinguish A4 from another sheet with the same proportions. Shadows, glare, blur, occlusion, pale or patterned surfaces, and strong perspective can affect the result. The checks are engineering limits, not a guarantee of accuracy for every camera or scene. Evaluate the detector on the photos you intend to use.
 
 ## Development
 
 ```bash
 python -m pip install -e ".[dev]"
 python -m pytest -q
-python -m build
 ```
 
-Tests cover synthetic paper geometry, patterned backgrounds, ambiguity,
-colour-boundary recovery, acceptance rules, coordinate mapping, and CLI
-outputs. No private capture images are required. GitHub Actions tests the
-package on Linux and Windows and checks installation from a built wheel.
-
-See [Contributing](CONTRIBUTING.md) for changes and regression tests.
+See [Contributing](CONTRIBUTING.md) for the project conventions.
 
 ## License
 

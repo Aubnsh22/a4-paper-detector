@@ -66,7 +66,7 @@ calibration or a measured phone angle. Lens distortion is assumed zero.
 
 ## Source extraction
 
-Version 0.1.0 extracts the Python A4 path from the Foot Measurement application:
+Version 0.2.0 follows the Python A4 path from the Foot Measurement application:
 
 | Original component | Standalone component |
 | --- | --- |
@@ -77,8 +77,8 @@ Version 0.1.0 extracts the Python A4 path from the Foot Measurement application:
 | A4 coordinates and homography in `src/geometry.py` | `a4_detector.geometry` |
 | A4 entries from `config/capture_policy.json` | Packaged `reference_policy.json` |
 
-The public wrapper, JSON output, CLI, packaging, and integration tests are
-specific to this repository. The original core retains its
+The public wrapper, JSON output, single-image and folder commands, packaging,
+and integration tests are specific to this repository. The original core retains its
 `FOOT_A4_RESIDUAL_POLICY` environment setting for reproducibility. Leave it
 unset for the documented baseline; `strict_v1` changes core candidate
 filtering. The application's reference checks still apply in `detect_a4()`.

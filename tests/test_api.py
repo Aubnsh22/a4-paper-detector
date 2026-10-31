@@ -127,3 +127,25 @@ def test_cli_rejection_and_bad_input_exit_codes(tmp_path):
     protected = subprocess.run([sys.executable, "-m", "a4_detector", str(photo), "--output", str(photo)], capture_output=True, text=True)
     assert protected.returncode == 2
     assert photo.read_bytes().startswith(b"\x89PNG")
+
+
+def test_folder_cli_saves_overlays_and_rejection_reasons(tmp_path):
+    source = tmp_path / "photos"
+    source.mkdir()
+    good, _ = paper()
+    cv2.imwrite(str(source / "good.png"), good)
+    cv2.imwrite(str(source / "blank.png"), np.full((960, 1280, 3), 65, np.uint8))
+    output = tmp_path / "comparison"
+    completed = subprocess.run([sys.executable, "-m", "a4_detector.folder_cli",
+        str(source), "--output-dir", str(output)], capture_output=True, text=True)
+    assert completed.returncode == 0, completed.stderr
+    report = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+    assert report["images"] == 2
+    assert report["accepted"] == 1
+    assert report["rejected"] == 1
+    assert (output / "annotated" / "good.png").is_file()
+    assert (output / "annotated" / "blank.png").is_file()
+    blank = json.loads((output / "results" / "blank.json").read_text(encoding="utf-8"))
+    assert not blank["valid"]
+    assert blank["messages"]
+    assert "image,valid,reasons" in (output / "summary.csv").read_text(encoding="utf-8-sig")
